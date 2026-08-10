@@ -345,6 +345,137 @@ def status():
     )
 
 
+
+@app.get("/admin")
+def admin_page():
+    return """
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>The Majin Labs — License Admin</title>
+<style>
+body{margin:0;background:#101014;color:#eee;font-family:Arial,sans-serif}
+.wrap{max-width:1100px;margin:30px auto;padding:0 20px}
+h1{margin-bottom:6px}.sub{color:#aaa;margin-bottom:25px}
+.card{background:#19191f;border:1px solid #333;border-radius:12px;padding:20px;margin-bottom:18px}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+button{background:#6d35d9;color:#fff;border:0;border-radius:7px;padding:11px 15px;cursor:pointer;font-weight:700}
+button:hover{filter:brightness(1.15)}
+input,select{width:100%;box-sizing:border-box;background:#101014;color:#fff;border:1px solid #444;border-radius:6px;padding:10px;margin-top:6px}
+label{display:block;color:#bbb;font-size:13px;margin-top:12px}
+.key{font-family:monospace;font-size:20px;color:#9f7cff;word-break:break-all}
+.result{margin-top:15px;padding:15px;border-radius:8px;background:#0d2115;border:1px solid #285d37}
+.error{background:#2a1111;border-color:#6b2b2b}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{padding:9px;border-bottom:1px solid #333;text-align:left;vertical-align:top}
+.actions button{margin:2px;padding:7px 9px;font-size:12px}
+.small{color:#888;font-size:12px}
+@media(max-width:800px){.grid{grid-template-columns:1fr 1fr}table{font-size:11px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>🔐 The Majin Labs — License Admin</h1>
+<div class="sub">Create, view, reset and revoke licenses. Admin token is never stored by this page.</div>
+
+<div class="card">
+<label>Admin Token
+<input id="token" type="password" placeholder="Enter your Render ADMIN_TOKEN">
+</label>
+</div>
+
+<div class="card">
+<h2>Generate License</h2>
+<div class="grid">
+<div><label>License Type<select id="type">
+<option value="7d">7 Day Free Trial</option>
+<option value="30d">30 Days</option>
+<option value="365d">1 Year</option>
+<option value="lifetime">Lifetime</option>
+<option value="5m">5 Minute Test</option>
+<option value="custom">Custom</option>
+</select></label></div>
+<div><label>License Name<input id="name" placeholder="Optional"></label></div>
+<div><label>Custom Days<input id="days" type="number" min="0.001" step="0.001" placeholder="Only for Custom"></label></div>
+<div><label>Notes<input id="notes" placeholder="Optional note"></label></div>
+</div>
+<br>
+<button onclick="createLicense()">GENERATE KEY</button>
+<button onclick="loadLicenses()" style="margin-left:8px">REFRESH LICENSES</button>
+<div id="result"></div>
+</div>
+
+<div class="card">
+<h2>Licenses</h2>
+<div id="licenses">Enter your admin token, then click REFRESH LICENSES.</div>
+</div>
+</div>
+
+<script>
+function token(){return document.getElementById('token').value.trim()}
+function headers(){return {'Content-Type':'application/json','X-Admin-Token':token()}}
+function showResult(msg,ok=true){
+ const el=document.getElementById('result');
+ el.className=ok?'result':'result error'; el.innerHTML=msg;
+}
+async function createLicense(){
+ if(!token()){showResult('Enter the Admin Token first.',false);return}
+ const type=document.getElementById('type').value;
+ const data={license_type:type};
+ const name=document.getElementById('name').value.trim();
+ const notes=document.getElementById('notes').value.trim();
+ const days=document.getElementById('days').value;
+ if(name)data.license_name=name;
+ if(notes)data.notes=notes;
+ if(type==='custom'){
+   if(!days){showResult('Enter Custom Days.',false);return}
+   data.custom_days=Number(days);
+ }
+ try{
+   const r=await fetch('/api/admin/create-license',{method:'POST',headers:headers(),body:JSON.stringify(data)});
+   const j=await r.json();
+   if(!j.ok){showResult('❌ '+(j.message||'Failed'),false);return}
+   showResult('<b>KEY CREATED</b><div class="key">'+j.license_key+'</div><div>'+j.license_name+' — '+j.license_type+'</div><div class="small">Copy this key and keep it secure.</div>');
+   loadLicenses();
+ }catch(e){showResult('❌ '+e,false)}
+}
+async function loadLicenses(){
+ if(!token()){document.getElementById('licenses').innerText='Enter your Admin Token first.';return}
+ try{
+  const r=await fetch('/api/admin/licenses',{headers:{'X-Admin-Token':token()}});
+  const j=await r.json();
+  if(!j.ok){document.getElementById('licenses').innerText='❌ '+(j.message||'Unauthorized');return}
+  if(!j.licenses.length){document.getElementById('licenses').innerText='No licenses yet.';return}
+  let html='<table><tr><th>Key</th><th>Type</th><th>Status</th><th>Machine</th><th>Expires</th><th>Actions</th></tr>';
+  for(const x of j.licenses){
+   const status=Number(x.revoked)?'REVOKED':(x.machine_id?'ACTIVATED':'UNUSED');
+   html+='<tr><td><b>'+esc(x.license_key)+'</b><br><span class="small">'+esc(x.license_name)+'</span></td>';
+   html+='<td>'+esc(x.license_type)+'</td><td>'+status+'</td>';
+   html+='<td>'+esc(x.machine_id||'—')+'</td><td>'+esc(x.expires_at||'LIFETIME / not activated')+'</td>';
+   html+='<td class="actions"><button onclick="resetLicense(\\''+escJs(x.license_key)+'\\')">RESET</button><button onclick="revokeLicense(\\''+escJs(x.license_key)+'\\')">REVOKE</button></td></tr>';
+  }
+  html+='</table>'; document.getElementById('licenses').innerHTML=html;
+ }catch(e){document.getElementById('licenses').innerText='❌ '+e}
+}
+async function resetLicense(key){
+ if(!confirm('Reset this license for a new machine activation?'))return;
+ const r=await fetch('/api/admin/reset',{method:'POST',headers:headers(),body:JSON.stringify({license_key:key})});
+ const j=await r.json(); if(!j.ok)alert(j.message||'Failed'); loadLicenses();
+}
+async function revokeLicense(key){
+ if(!confirm('Revoke this license? The customer will be locked out on the next server check.'))return;
+ const r=await fetch('/api/admin/revoke',{method:'POST',headers:headers(),body:JSON.stringify({license_key:key})});
+ const j=await r.json(); if(!j.ok)alert(j.message||'Failed'); loadLicenses();
+}
+function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function escJs(s){return String(s??'').replace(/\\/g,'\\\\').replace(/'/g,"\\'")}
+</script>
+</body>
+</html>
+"""
+
 @app.post("/api/admin/create-license")
 @_require_admin
 def admin_create_license():
