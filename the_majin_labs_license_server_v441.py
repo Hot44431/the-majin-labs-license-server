@@ -402,8 +402,8 @@ th,td{padding:9px;border-bottom:1px solid #333;text-align:left;vertical-align:to
 <div><label>Notes<input id="notes" placeholder="Optional note"></label></div>
 </div>
 <br>
-<button onclick="createLicense()">GENERATE KEY</button>
-<button onclick="loadLicenses()" style="margin-left:8px">REFRESH LICENSES</button>
+<button id="generate-btn">GENERATE KEY</button>
+<button id="refresh-btn" style="margin-left:8px">REFRESH LICENSES</button>
 <div id="result"></div>
 </div>
 
@@ -414,62 +414,91 @@ th,td{padding:9px;border-bottom:1px solid #333;text-align:left;vertical-align:to
 </div>
 
 <script>
-function token(){return document.getElementById('token').value.trim()}
-function headers(){return {'Content-Type':'application/json','X-Admin-Token':token()}}
-function showResult(msg,ok=true){
- const el=document.getElementById('result');
- el.className=ok?'result':'result error'; el.innerHTML=msg;
+const $ = (id) => document.getElementById(id);
+const adminToken = () => $('token').value.trim();
+const authHeaders = () => ({'Content-Type':'application/json','X-Admin-Token':adminToken()});
+
+function result(message, ok) {
+  const box = $('result');
+  box.className = ok ? 'result' : 'result error';
+  box.innerHTML = message;
 }
-async function createLicense(){
- if(!token()){showResult('Enter the Admin Token first.',false);return}
- const type=document.getElementById('type').value;
- const data={license_type:type};
- const name=document.getElementById('name').value.trim();
- const notes=document.getElementById('notes').value.trim();
- const days=document.getElementById('days').value;
- if(name)data.license_name=name;
- if(notes)data.notes=notes;
- if(type==='custom'){
-   if(!days){showResult('Enter Custom Days.',false);return}
-   data.custom_days=Number(days);
- }
- try{
-   const r=await fetch('/api/admin/create-license',{method:'POST',headers:headers(),body:JSON.stringify(data)});
-   const j=await r.json();
-   if(!j.ok){showResult('❌ '+(j.message||'Failed'),false);return}
-   showResult('<b>KEY CREATED</b><div class="key">'+j.license_key+'</div><div>'+j.license_name+' — '+j.license_type+'</div><div class="small">Copy this key and keep it secure.</div>');
-   loadLicenses();
- }catch(e){showResult('❌ '+e,false)}
-}
-async function loadLicenses(){
- if(!token()){document.getElementById('licenses').innerText='Enter your Admin Token first.';return}
- try{
-  const r=await fetch('/api/admin/licenses',{headers:{'X-Admin-Token':token()}});
-  const j=await r.json();
-  if(!j.ok){document.getElementById('licenses').innerText='❌ '+(j.message||'Unauthorized');return}
-  if(!j.licenses.length){document.getElementById('licenses').innerText='No licenses yet.';return}
-  let html='<table><tr><th>Key</th><th>Type</th><th>Status</th><th>Machine</th><th>Expires</th><th>Actions</th></tr>';
-  for(const x of j.licenses){
-   const status=Number(x.revoked)?'REVOKED':(x.machine_id?'ACTIVATED':'UNUSED');
-   html+='<tr><td><b>'+esc(x.license_key)+'</b><br><span class="small">'+esc(x.license_name)+'</span></td>';
-   html+='<td>'+esc(x.license_type)+'</td><td>'+status+'</td>';
-   html+='<td>'+esc(x.machine_id||'—')+'</td><td>'+esc(x.expires_at||'LIFETIME / not activated')+'</td>';
-   html+='<td class="actions"><button onclick="resetLicense('+JSON.stringify(x.license_key)+')">RESET</button><button onclick="revokeLicense('+JSON.stringify(x.license_key)+')">REVOKE</button></td></tr>';
+
+async function createLicense() {
+  if (!adminToken()) { result('Enter the Admin Token first.', false); return; }
+  const type = $('type').value;
+  const data = {license_type:type};
+  const name = $('name').value.trim();
+  const notes = $('notes').value.trim();
+  if (name) data.license_name = name;
+  if (notes) data.notes = notes;
+  if (type === 'custom') {
+    const days = $('days').value;
+    if (!days) { result('Enter Custom Days.', false); return; }
+    data.custom_days = Number(days);
   }
-  html+='</table>'; document.getElementById('licenses').innerHTML=html;
- }catch(e){document.getElementById('licenses').innerText='❌ '+e}
+  try {
+    const response = await fetch('/api/admin/create-license', {
+      method:'POST', headers:authHeaders(), body:JSON.stringify(data)
+    });
+    const json = await response.json();
+    if (!json.ok) { result('❌ ' + (json.message || 'Failed'), false); return; }
+    result('<b>KEY CREATED</b><div class="key">' + json.license_key + '</div><div>' +
+      json.license_name + ' — ' + json.license_type + '</div><div class="small">Copy this key and keep it secure.</div>', true);
+    await loadLicenses();
+  } catch (error) {
+    result('❌ ' + error, false);
+  }
 }
-async function resetLicense(key){
- if(!confirm('Reset this license for a new machine activation?'))return;
- const r=await fetch('/api/admin/reset',{method:'POST',headers:headers(),body:JSON.stringify({license_key:key})});
- const j=await r.json(); if(!j.ok)alert(j.message||'Failed'); loadLicenses();
+
+async function loadLicenses() {
+  if (!adminToken()) { $('licenses').innerText = 'Enter your admin token, then click REFRESH LICENSES.'; return; }
+  try {
+    const response = await fetch('/api/admin/licenses', {headers:{'X-Admin-Token':adminToken()}});
+    const json = await response.json();
+    if (!json.ok) { $('licenses').innerText = '❌ ' + (json.message || 'Unauthorized'); return; }
+    if (!json.licenses.length) { $('licenses').innerText = 'No licenses yet.'; return; }
+    let html = '<table><tr><th>Key</th><th>Type</th><th>Status</th><th>Machine</th><th>Expires</th><th>Actions</th></tr>';
+    for (const item of json.licenses) {
+      const status = Number(item.revoked) ? 'REVOKED' : (item.machine_id ? 'ACTIVATED' : 'UNUSED');
+      html += '<tr><td><b>' + escapeHtml(item.license_key) + '</b><br><span class="small">' + escapeHtml(item.license_name) +
+        '</span></td><td>' + escapeHtml(item.license_type) + '</td><td>' + status + '</td><td>' +
+        escapeHtml(item.machine_id || '—') + '</td><td>' + escapeHtml(item.expires_at || 'LIFETIME / not activated') +
+        '</td><td class="actions"><button class="reset-btn" data-key="' + escapeAttr(item.license_key) + '">RESET</button> ' +
+        '<button class="revoke-btn" data-key="' + escapeAttr(item.license_key) + '">REVOKE</button></td></tr>';
+    }
+    html += '</table>';
+    $('licenses').innerHTML = html;
+    document.querySelectorAll('.reset-btn').forEach(btn => btn.addEventListener('click', () => resetLicense(btn.dataset.key)));
+    document.querySelectorAll('.revoke-btn').forEach(btn => btn.addEventListener('click', () => revokeLicense(btn.dataset.key)));
+  } catch (error) {
+    $('licenses').innerText = '❌ ' + error;
+  }
 }
-async function revokeLicense(key){
- if(!confirm('Revoke this license? The customer will be locked out on the next server check.'))return;
- const r=await fetch('/api/admin/revoke',{method:'POST',headers:headers(),body:JSON.stringify({license_key:key})});
- const j=await r.json(); if(!j.ok)alert(j.message||'Failed'); loadLicenses();
+
+async function resetLicense(key) {
+  if (!confirm('Reset this license for a new machine activation?')) return;
+  const response = await fetch('/api/admin/reset', {method:'POST', headers:authHeaders(), body:JSON.stringify({license_key:key})});
+  const json = await response.json();
+  if (!json.ok) alert(json.message || 'Failed');
+  await loadLicenses();
 }
-function esc(s){return String(s??'').split('&').join('&amp;').split('<').join('&lt;').split('>').join('&gt;').split('\"').join('&quot;').split("'").join('&#39;')}
+
+async function revokeLicense(key) {
+  if (!confirm('Revoke this license? The customer will be locked out on the next server check.')) return;
+  const response = await fetch('/api/admin/revoke', {method:'POST', headers:authHeaders(), body:JSON.stringify({license_key:key})});
+  const json = await response.json();
+  if (!json.ok) alert(json.message || 'Failed');
+  await loadLicenses();
+}
+
+function escapeHtml(value) {
+  return String(value ?? '').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#39;');
+}
+function escapeAttr(value) { return escapeHtml(value); }
+
+$('generate-btn').addEventListener('click', createLicense);
+$('refresh-btn').addEventListener('click', loadLicenses);
 </script>
 </body>
 </html>
