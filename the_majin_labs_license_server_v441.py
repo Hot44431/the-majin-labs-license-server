@@ -136,19 +136,22 @@ def activate():
         now = datetime.now(timezone.utc)
         expires = now + timedelta(minutes=TEST_DURATION_MINUTES)
 
+        activated_at = now.isoformat()
+        expires_at = expires.isoformat()
+
         _update_license(
             key,
             machine_id=machine_id,
-            activated_at=now.isoformat(),
-            expires_at=expires.isoformat(),
+            activated_at=activated_at,
+            expires_at=expires_at,
         )
 
         return jsonify(
             ok=True,
             message="5-minute test license activated.",
             license_name=record["license_name"],
-            activated_at=record["activated_at"],
-            expires_at=record["expires_at"],
+            activated_at=activated_at,
+            expires_at=expires_at,
             server_token="test-token",
         )
 
