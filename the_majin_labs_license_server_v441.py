@@ -679,11 +679,11 @@ def admin_list():
 @app.get("/update.json")
 def update_manifest():
     return jsonify(
-        version=CURRENT_VERSION,
+        version="4.4.6",
         download_url=(
             "https://raw.githubusercontent.com/Hot44431/"
             "the-majin-labs-license-server/main/"
-            "The_Majin_Labs_Life_Size_Tool_v441_Online_Licensed.zip"
+            "The_Majin_Labs_Life_Size_Tool_v446_Online_Licensed.zip"
         ),
         notes="The Majin Labs Life Size Tool v4.4.1 production license system.",
     )
