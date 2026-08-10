@@ -3,7 +3,7 @@ The Majin Labs License Server - v4.4.1
 5-minute license test server.
 
 TEST KEY:
-    MJL-TEST-5MIN
+    MJL-TEST-5MIN-8427
 
 The key starts its 5-minute timer on first successful activation.
 This is an in-memory test only.
@@ -16,13 +16,13 @@ app = Flask(__name__)
 
 PRODUCT_ID = "the_majin_labs_life_size_tool"
 
-TEST_KEY = "MJL-TEST-5MIN"
+TEST_KEY = "MJL-TEST-5MIN-8427"
 TEST_DURATION_MINUTES = 5
 
 LICENSES = {
     TEST_KEY: {
         "product_id": PRODUCT_ID,
-        "license_name": "5 Minute Test License",
+        "license_name": "5 Minute Test License 8427",
         "machine_id": None,
         "activated_at": None,
         "expires_at": None,
