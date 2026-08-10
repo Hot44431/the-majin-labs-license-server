@@ -465,12 +465,14 @@ async function loadLicenses() {
         '</span></td><td>' + escapeHtml(item.license_type) + '</td><td>' + status + '</td><td>' +
         escapeHtml(item.machine_id || '—') + '</td><td>' + escapeHtml(item.expires_at || 'LIFETIME / not activated') +
         '</td><td class="actions"><button class="reset-btn" data-key="' + escapeAttr(item.license_key) + '">RESET</button> ' +
-        '<button class="revoke-btn" data-key="' + escapeAttr(item.license_key) + '">REVOKE</button></td></tr>';
+        '<button class="revoke-btn" data-key="' + escapeAttr(item.license_key) + '">REVOKE</button> ' +
+        '<button class="delete-btn" data-key="' + escapeAttr(item.license_key) + '" style="background:#b3261e">DELETE</button></td></tr>';
     }
     html += '</table>';
     $('licenses').innerHTML = html;
     document.querySelectorAll('.reset-btn').forEach(btn => btn.addEventListener('click', () => resetLicense(btn.dataset.key)));
     document.querySelectorAll('.revoke-btn').forEach(btn => btn.addEventListener('click', () => revokeLicense(btn.dataset.key)));
+    document.querySelectorAll('.delete-btn').forEach(btn => btn.addEventListener('click', () => deleteLicense(btn.dataset.key)));
   } catch (error) {
     $('licenses').innerText = '❌ ' + error;
   }
@@ -490,6 +492,22 @@ async function revokeLicense(key) {
   const json = await response.json();
   if (!json.ok) alert(json.message || 'Failed');
   await loadLicenses();
+}
+
+async function deleteLicense(key) {
+  if (!confirm('PERMANENTLY DELETE this license? This cannot be undone. The key will immediately become invalid.')) return;
+  const response = await fetch('/api/admin/delete', {
+    method:'POST',
+    headers:authHeaders(),
+    body:JSON.stringify({license_key:key})
+  });
+  const json = await response.json();
+  if (!json.ok) {
+    alert(json.message || 'Failed');
+    return;
+  }
+  await loadLicenses();
+  result('🗑️ <b>LICENSE DELETED</b><div class="small">' + escapeHtml(key) + '</div>', true);
 }
 
 function escapeHtml(value) {
@@ -552,6 +570,29 @@ def admin_revoke():
         return jsonify(ok=False, message="License not found."), 404
     _update_license(key, revoked=1)
     return jsonify(ok=True, message="License revoked.", license_key=key)
+
+
+@app.post("/api/admin/delete")
+@_require_admin
+def admin_delete():
+    data = request.get_json(silent=True) or {}
+    key = str(data.get("license_key", "")).strip().upper()
+    if not key:
+        return jsonify(ok=False, message="License key is required."), 400
+
+    record = _get_license(key)
+    if not record:
+        return jsonify(ok=False, message="License not found."), 404
+
+    conn = _db()
+    if _is_postgres():
+        conn.execute("DELETE FROM licenses WHERE license_key = %s", (key,))
+    else:
+        conn.execute("DELETE FROM licenses WHERE license_key = ?", (key,))
+    conn.commit()
+    conn.close()
+
+    return jsonify(ok=True, message="License permanently deleted.", license_key=key)
 
 
 @app.post("/api/admin/reset")
