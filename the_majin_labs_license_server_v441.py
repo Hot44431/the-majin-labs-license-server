@@ -29,6 +29,9 @@ import secrets
 import sqlite3
 from datetime import datetime, timezone, timedelta
 from functools import wraps
+from collections import defaultdict, deque
+from threading import Lock
+import re
 
 from flask import Flask, request, jsonify
 
@@ -40,6 +43,57 @@ except Exception:
     dict_row = None
 
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 16 * 1024  # 16 KB JSON requests
+
+# ---------------------------------------------------------------------------
+# Basic abuse protection
+# ---------------------------------------------------------------------------
+# This is intentionally dependency-free so it works on Render without adding
+# another package. For multi-instance deployments, put a real rate limiter /
+# WAF in front of the service as well.
+_RATE_LIMIT_LOCK = Lock()
+_RATE_BUCKETS = defaultdict(deque)
+
+RATE_WINDOW_SECONDS = 60
+ACTIVATE_LIMIT = 20
+STATUS_LIMIT = 60
+ADMIN_LIMIT = 30
+
+def _client_ip():
+    # Render/proxies should normally provide the connecting IP in X-Forwarded-For.
+    # Take the first value because it is the original client in the usual proxy setup.
+    forwarded = request.headers.get("X-Forwarded-For", "")
+    if forwarded:
+        return forwarded.split(",")[0].strip()[:64]
+    return (request.remote_addr or "unknown")[:64]
+
+def _rate_limit(bucket_name, limit):
+    now = _utc_now().timestamp()
+    cutoff = now - RATE_WINDOW_SECONDS
+    key = f"{bucket_name}:{_client_ip()}"
+    with _RATE_LIMIT_LOCK:
+        bucket = _RATE_BUCKETS[key]
+        while bucket and bucket[0] <= cutoff:
+            bucket.popleft()
+        if len(bucket) >= limit:
+            return False
+        bucket.append(now)
+        return True
+
+def _safe_license_key(key):
+    return bool(re.fullmatch(r"[A-Z0-9]{2,16}-[A-Z0-9]{6,32}", key))
+
+@app.after_request
+def _security_headers(response):
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    if request.is_secure:
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
+
 
 PRODUCT_ID = "the_majin_labs_life_size_tool"
 CURRENT_VERSION = "4.4.1"
@@ -194,6 +248,8 @@ def _update_license(key, **fields):
 def _require_admin(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
+        if not _rate_limit("admin", ADMIN_LIMIT):
+            return jsonify(ok=False, message="Too many admin requests. Please try again later."), 429
         if not ADMIN_TOKEN:
             return jsonify(ok=False, message="Admin API is not configured."), 503
         supplied = request.headers.get("X-Admin-Token", "")
@@ -240,7 +296,7 @@ def _duration_from_request(data):
 
 
 def _generate_key(prefix="MJL"):
-    return f"{prefix}-{secrets.token_hex(6).upper()}"
+    return f"{prefix}-{secrets.token_hex(16).upper()}"
 
 
 _init_db()
@@ -248,11 +304,13 @@ _init_db()
 
 @app.get("/")
 def health():
-    return jsonify(ok=True, service="The Majin Labs License Server", version=CURRENT_VERSION)
+    return jsonify(ok=True, service="The Majin Labs License Server")
 
 
 @app.post("/api/activate")
 def activate():
+    if not _rate_limit("activate", ACTIVATE_LIMIT):
+        return jsonify(ok=False, message="Too many activation attempts. Please try again later."), 429
     data = request.get_json(silent=True) or {}
     product_id = str(data.get("product_id", "")).strip()
     key = str(data.get("license_key", "")).strip().upper()
@@ -289,7 +347,6 @@ def activate():
             license_type=record.get("license_type", "custom"),
             activated_at=activated_at,
             expires_at=new_expires,
-            server_token="mjl-v441",
         )
 
     if record["machine_id"] == machine_id:
@@ -300,7 +357,6 @@ def activate():
             license_type=record.get("license_type", "custom"),
             activated_at=record.get("activated_at"),
             expires_at=record.get("expires_at"),
-            server_token="mjl-v441",
         )
 
     return jsonify(ok=False, message="This license key has already been activated on another computer."), 403
@@ -308,6 +364,8 @@ def activate():
 
 @app.post("/api/status")
 def status():
+    if not _rate_limit("status", STATUS_LIMIT):
+        return jsonify(ok=False, message="Too many status requests. Please try again later."), 429
     data = request.get_json(silent=True) or {}
     product_id = str(data.get("product_id", "")).strip()
     key = str(data.get("license_key", "")).strip().upper()
@@ -447,7 +505,7 @@ async function createLicense() {
       json.license_name + ' — ' + json.license_type + '</div><div class="small">Copy this key and keep it secure.</div>', true);
     await loadLicenses();
   } catch (error) {
-    result('❌ ' + error, false);
+    result('❌ Request failed. Please try again.', false);
   }
 }
 
@@ -529,9 +587,11 @@ def admin_create_license():
     try:
         license_type, duration_seconds, default_name = _duration_from_request(data)
     except Exception as exc:
-        return jsonify(ok=False, message=str(exc)), 400
+        return jsonify(ok=False, message="Invalid license configuration."), 400
 
     key = str(data.get("license_key", "")).strip().upper() or _generate_key()
+    if not _safe_license_key(key):
+        return jsonify(ok=False, message="Invalid license key format."), 400
     name = str(data.get("license_name", "")).strip() or default_name
     notes = str(data.get("notes", "")).strip()
 
@@ -627,6 +687,24 @@ def update_manifest():
         ),
         notes="The Majin Labs Life Size Tool v4.4.1 production license system.",
     )
+
+
+@app.errorhandler(413)
+def request_too_large(error):
+    return jsonify(ok=False, message="Request too large."), 413
+
+@app.errorhandler(400)
+def bad_request(error):
+    return jsonify(ok=False, message="Bad request."), 400
+
+@app.errorhandler(404)
+def not_found(error):
+    return jsonify(ok=False, message="Not found."), 404
+
+@app.errorhandler(405)
+def method_not_allowed(error):
+    return jsonify(ok=False, message="Method not allowed."), 405
+
 
 
 if __name__ == "__main__":
