@@ -1,31 +1,31 @@
 """
-The Majin Labs License Server - v4.4 starter.
+The Majin Labs License Server - v4.4.1
+5-minute license test server.
 
-Install:
-    pip install flask
+TEST KEY:
+    MJL-TEST-5MIN
 
-Run locally for testing:
-    python the_majin_labs_license_server_v44.py
-
-IMPORTANT:
-This starter server uses an in-memory dictionary for testing only.
-For real sales, replace it with persistent database storage and deploy
-behind HTTPS.
+The key starts its 5-minute timer on first successful activation.
+This is an in-memory test only.
 """
+
 from flask import Flask, request, jsonify
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 app = Flask(__name__)
 
 PRODUCT_ID = "the_majin_labs_life_size_tool"
 
-# Demo key for testing only.
+TEST_KEY = "MJL-TEST-5MIN"
+TEST_DURATION_MINUTES = 5
+
 LICENSES = {
-    "MJL-DEMO-0001": {
+    TEST_KEY: {
         "product_id": PRODUCT_ID,
-        "license_name": "Demo Lifetime License",
+        "license_name": "5 Minute Test License",
         "machine_id": None,
         "activated_at": None,
+        "expires_at": None,
     }
 }
 
@@ -33,42 +33,64 @@ LICENSES = {
 @app.post("/api/activate")
 def activate():
     data = request.get_json(silent=True) or {}
+
     product_id = str(data.get("product_id", "")).strip()
     key = str(data.get("license_key", "")).strip().upper()
     machine_id = str(data.get("machine_id", "")).strip()
 
     if product_id != PRODUCT_ID:
         return jsonify(ok=False, message="Invalid product."), 400
+
     if not key or not machine_id:
-        return jsonify(ok=False, message="License key and machine ID are required."), 400
+        return jsonify(
+            ok=False,
+            message="License key and machine ID are required."
+        ), 400
 
     record = LICENSES.get(key)
+
     if record is None:
         return jsonify(ok=False, message="Invalid license key."), 403
 
-    # FIRST USE: permanently bind the key to this machine.
+    # Check expiration if this key has already been activated.
+    if record["expires_at"] is not None:
+        expires_at = datetime.fromisoformat(record["expires_at"])
+
+        if datetime.now(timezone.utc) >= expires_at:
+            return jsonify(
+                ok=False,
+                message="License expired."
+            ), 403
+
+    # First activation starts the 5-minute timer.
     if record["machine_id"] is None:
+        now = datetime.now(timezone.utc)
+        expires = now + timedelta(minutes=TEST_DURATION_MINUTES)
+
         record["machine_id"] = machine_id
-        record["activated_at"] = datetime.now(timezone.utc).isoformat()
+        record["activated_at"] = now.isoformat()
+        record["expires_at"] = expires.isoformat()
+
         return jsonify(
             ok=True,
-            message="License activated successfully.",
+            message="5-minute test license activated.",
             license_name=record["license_name"],
             activated_at=record["activated_at"],
-            server_token="demo-token",
+            expires_at=record["expires_at"],
+            server_token="test-token",
         )
 
-    # SAME MACHINE: allow the customer to re-run activation.
+    # Same computer can re-run activation while the key is valid.
     if record["machine_id"] == machine_id:
         return jsonify(
             ok=True,
-            message="License already belongs to this computer.",
+            message="5-minute test license is active.",
             license_name=record["license_name"],
             activated_at=record["activated_at"],
-            server_token="demo-token",
+            expires_at=record["expires_at"],
+            server_token="test-token",
         )
 
-    # DIFFERENT MACHINE: reject permanently until YOU reset it.
     return jsonify(
         ok=False,
         message="This license key has already been activated on another computer."
@@ -77,10 +99,13 @@ def activate():
 
 @app.get("/update.json")
 def update_manifest():
-    # Change these values whenever you publish a new version.
     return jsonify(
         version="4.4.1",
-        download_url="https://raw.githubusercontent.com/Hot44431/the-majin-labs-license-server/main/The_Majin_Labs_Life_Size_Tool_v441_Online_Licensed.zip",
+        download_url=(
+            "https://raw.githubusercontent.com/Hot44431/"
+            "the-majin-labs-license-server/main/"
+            "The_Majin_Labs_Life_Size_Tool_v441_Online_Licensed.zip"
+        ),
         notes="TEST UPDATE v4.4.1 - update system test.",
     )
 
