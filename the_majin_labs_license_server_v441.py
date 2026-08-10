@@ -454,7 +454,7 @@ async function loadLicenses(){
    html+='<tr><td><b>'+esc(x.license_key)+'</b><br><span class="small">'+esc(x.license_name)+'</span></td>';
    html+='<td>'+esc(x.license_type)+'</td><td>'+status+'</td>';
    html+='<td>'+esc(x.machine_id||'—')+'</td><td>'+esc(x.expires_at||'LIFETIME / not activated')+'</td>';
-   html+='<td class="actions"><button onclick="resetLicense(\\''+escJs(x.license_key)+'\\')">RESET</button><button onclick="revokeLicense(\\''+escJs(x.license_key)+'\\')">REVOKE</button></td></tr>';
+   html+='<td class="actions"><button onclick="resetLicense('+JSON.stringify(x.license_key)+')">RESET</button><button onclick="revokeLicense('+JSON.stringify(x.license_key)+')">REVOKE</button></td></tr>';
   }
   html+='</table>'; document.getElementById('licenses').innerHTML=html;
  }catch(e){document.getElementById('licenses').innerText='❌ '+e}
@@ -469,8 +469,7 @@ async function revokeLicense(key){
  const r=await fetch('/api/admin/revoke',{method:'POST',headers:headers(),body:JSON.stringify({license_key:key})});
  const j=await r.json(); if(!j.ok)alert(j.message||'Failed'); loadLicenses();
 }
-function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
-function escJs(s){return String(s??'').replace(/\\/g,'\\\\').replace(/'/g,"\\'")}
+function esc(s){return String(s??'').split('&').join('&amp;').split('<').join('&lt;').split('>').join('&gt;').split('\"').join('&quot;').split("'").join('&#39;')}
 </script>
 </body>
 </html>
