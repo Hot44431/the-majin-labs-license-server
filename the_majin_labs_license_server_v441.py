@@ -97,7 +97,7 @@ def _security_headers(response):
 
 PRODUCT_ID = "the_majin_labs_life_size_tool"
 CURRENT_VERSION = "4.4.1"
-UPDATE_VERSION = "4.4.7"
+UPDATE_VERSION = "4.4.8"
 
 TEST_KEY = "MJL-TEST-5MIN-8427"
 TEST_DURATION_SECONDS = 5 * 60
@@ -684,9 +684,9 @@ def update_manifest():
         download_url=(
             "https://raw.githubusercontent.com/Hot44431/"
             "the-majin-labs-license-server/main/"
-            "The_Majin_Labs_Life_Size_Tool_v447_Production_Customer.zip"
+            "The_Majin_Labs_Life_Size_Tool_v448_NEW_UPDATE.zip"
         ),
-        notes="The Majin Labs Life Size Tool v4.4.7 production update.",
+        notes="The Majin Labs Life Size Tool v4.4.8 production update.",
     )
 
 
