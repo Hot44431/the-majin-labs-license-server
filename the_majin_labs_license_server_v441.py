@@ -100,7 +100,7 @@ def _security_headers(response):
 
 PRODUCT_ID = "the_majin_labs_life_size_tool"
 CURRENT_VERSION = "4.4.1"
-UPDATE_VERSION = "4.4.9"
+UPDATE_VERSION = "4.4.10"
 
 TEST_KEY = "MJL-TEST-5MIN-8427"
 TEST_DURATION_SECONDS = 5 * 60
