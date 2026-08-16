@@ -25,6 +25,7 @@ this source file or the Blender addon.
 """
 
 import os
+import json
 import secrets
 import sqlite3
 from datetime import datetime, timezone, timedelta
